@@ -76,9 +76,16 @@ export async function enablePush(): Promise<void> {
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Appen är inte helt installerad än – öppna den via https-länken.')), 8000)),
   ])
   const { publicKey } = await api<{ publicKey: string }>('GET', '/vapid')
-  const subscription =
-    (await reg.pushManager.getSubscription()) ??
-    (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(publicKey) }))
+  let subscription: PushSubscription
+  try {
+    subscription =
+      (await reg.pushManager.getSubscription()) ??
+      (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(publicKey) }))
+  } catch (err) {
+    // Typical in Brave (Google push service switched off): "push service not available".
+    const hint = 'brave' in navigator ? ' I Brave: slå på ”Använd Googles tjänster för push-meddelanden” under Integritet och säkerhet.' : ''
+    throw new Error(`Kunde inte registrera notiser (${err instanceof Error ? err.message : err}).${hint}`)
+  }
   await api('PUT', '/subscription', { subscription: subscription.toJSON(), ...(await currentPayload()) })
 }
 

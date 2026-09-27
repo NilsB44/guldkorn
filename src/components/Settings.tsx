@@ -7,6 +7,7 @@ import { createBackup, restoreBackup } from '../lib/backup'
 import { buildReminderIcs } from '../lib/calendar'
 import { cadenceLabel, formatDateTime } from '../lib/dates'
 import { currentPayload, disablePush, enablePush, pushState, sendTestPush, type PushState } from '../lib/push'
+import { isIos, isStandalone } from '../lib/platform'
 import { seedDemoData } from '../lib/demo'
 import { shareFiles } from '../lib/share'
 import { ConfirmButton, Header, Segmented } from './ui'
@@ -225,10 +226,50 @@ export default function Settings() {
   )
 }
 
-const PUSH_INFO: Partial<Record<PushState, string>> = {
-  'install-first': 'Lägg till appen på hemskärmen och öppna den därifrån för att kunna få notiser.',
-  unsupported: 'Den här webbläsaren kan inte ta emot notiser.',
-  denied: 'Notiser är blockerade. Slå på dem i iPhone-inställningar → Notiser → Guldkorn.',
+const isBrave = () => 'brave' in navigator
+
+function pushInfo(state: PushState): string {
+  switch (state) {
+    case 'install-first':
+      return 'Lägg till appen på hemskärmen och öppna den därifrån för att kunna få notiser.'
+    case 'unsupported':
+      return 'Den här webbläsaren kan inte ta emot notiser.'
+    case 'denied':
+      if (isIos()) return 'Notiser är blockerade. Slå på dem i iPhone-inställningar → Notiser → Guldkorn.'
+      if (isBrave())
+        return 'Notiser är blockerade. I Brave: Inställningar → Integritet och säkerhet → slå på ”Använd Googles tjänster för push-meddelanden”, starta om Brave. Kolla även Webbplatsinställningar → Aviseringar.'
+      return 'Notiser är blockerade för den här sidan. Återställ i webbläsarens Webbplatsinställningar → Aviseringar (och kolla att webbläsaren får visa aviseringar i Android-inställningarna).'
+    default:
+      return ''
+  }
+}
+
+/** Raw facts for troubleshooting on a real phone. */
+function PushDiagnostics() {
+  const [lines, setLines] = useState<string[]>([])
+  useEffect(() => {
+    ;(async () => {
+      const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined
+      setLines([
+        `Webbläsare: ${isBrave() ? 'Brave' : navigator.userAgent.match(/(CriOS|Chrome|Firefox|Version)\/[\d.]+/)?.[0] ?? '?'}${isIos() ? ' (iOS)' : ''}`,
+        `Hemskärmsläge: ${isStandalone() ? 'ja' : 'nej'}`,
+        `Notisbehörighet: ${'Notification' in window ? Notification.permission : 'saknas'}`,
+        `Service worker: ${reg ? (reg.active ? 'aktiv' : 'installeras') : 'saknas'}`,
+        `Push-stöd: ${'PushManager' in window ? 'ja' : 'nej'} · prenumeration: ${(await reg?.pushManager?.getSubscription()) ? 'ja' : 'nej'}`,
+        `Säker anslutning: ${isSecureContext ? 'ja' : 'nej (http)'}`,
+      ])
+    })()
+  }, [])
+  return (
+    <details className="text-xs text-muted">
+      <summary className="cursor-pointer">Felsökning</summary>
+      <ul className="mt-2 space-y-0.5 font-mono">
+        {lines.map((l) => (
+          <li key={l}>{l}</li>
+        ))}
+      </ul>
+    </details>
+  )
 }
 
 function PushControls() {
@@ -278,9 +319,17 @@ function PushControls() {
           <Bell size={18} /> Slå på påminnelser
         </button>
       ) : (
-        <p className="text-sm text-muted">{PUSH_INFO[state]}</p>
+        <>
+          <p className="text-sm text-muted">{pushInfo(state)}</p>
+          {state === 'denied' && (
+            <button className="btn-secondary w-full py-2 text-sm" onClick={async () => setState(await pushState())}>
+              Jag har ändrat – kolla igen
+            </button>
+          )}
+        </>
       )}
       {info && <p className="text-sm text-muted">{info}</p>}
+      <PushDiagnostics key={state} />
     </div>
   )
 }
