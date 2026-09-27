@@ -28,6 +28,11 @@ Run `npm test` and `npm run test:e2e` before committing.
   (pattern used in AlbumDetail, BookView, Settings).
 - Don't use `crypto.randomUUID` (needs https; LAN testing is http). Use `newId()`.
 - Don't write to the DB inside `useLiveQuery` callbacks.
+- **Her photos must survive every update.** Never change or remove existing tables or indexes in `db.ts`
+  in place. Add a new `this.version(n + 1).stores(...)` with an `.upgrade()` if data needs migrating.
+  New optional fields don't need a version bump. Settings fall back to `defaultSettings` for missing keys.
+- Keep the URL stable (GitHub user `NilsB44`, repo `guldkorn`). Her data belongs to the origin
+  `nilsb44.github.io`, so a rename means her old data won't show up at the new address.
 - Test on iPhone-sized viewports. Respect safe areas (`pt-safe`/`pb-safe`) and keep inputs ≥16px.
 
 ## Architecture
