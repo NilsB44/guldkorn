@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+
+/* ─────────────────────────────────────────────────────────────
+   🎨 THEME — change colours, fonts and roundness here.
+   Every colour becomes a Tailwind class: bg-paper, text-ink,
+   border-line, bg-accent, text-accent, bg-accent-soft …
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --color-paper: #faf7f2; /* app background */
+  --color-card: #ffffff; /* cards & sheets */
+  --color-ink: #2b2622; /* main text */
+  --color-muted: #8a8079; /* secondary text */
+  --color-line: #ece6de; /* borders & dividers */
+  --color-accent: #c8963e; /* gold — buttons, highlights */
+  --color-accent-ink: #ffffff; /* text on accent */
+  --color-accent-soft: #f5ead6; /* light gold backgrounds */
+  --color-keep: #6b9e7a; /* "behåll" */
+  --color-skip: #c97b6d; /* "hoppa över" */
+
+  /* System fonts only (no external font requests). On iPhone ui-serif = "New York". */
+  --font-serif: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  --radius-card: 1.5rem;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 16px inputs stop iOS Safari from zooming when a field is focused */
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top), 1rem);
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+}
+
+@layer components {
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 font-medium transition active:scale-[0.97] disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply bg-accent text-accent-ink shadow-sm;
+  }
+  .btn-secondary {
+    @apply border border-line bg-card text-ink;
+  }
+  .btn-ghost {
+    @apply px-3 text-muted;
+  }
+  .card {
+    @apply rounded-card border border-line bg-card;
+  }
+  .title {
+    @apply font-serif text-3xl tracking-tight;
+  }
+  .label {
+    @apply text-xs font-semibold tracking-wider text-muted uppercase;
+  }
+}
