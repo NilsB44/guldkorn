@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { webcrypto } from 'node:crypto'
 
 const TOML = new URL('../wrangler.toml', import.meta.url)
-const wrangler = (args, opts = {}) => spawnSync('npx', ['wrangler', ...args], { shell: true, encoding: 'utf8', ...opts })
+const wrangler = (args, opts = {}) => spawnSync(`npx wrangler ${args.join(' ')}`, { shell: true, encoding: 'utf8', ...opts })
 const step = (s) => console.log(`\n▸ ${s}`)
 
 let toml = readFileSync(TOML, 'utf8')
@@ -21,14 +21,14 @@ if (!/You are logged in/i.test(wrangler(['whoami']).stdout ?? '')) {
 }
 
 step('KV namespace for subscriptions')
-if (/^id = ""/m.test(toml)) {
+if (!/\[\[kv_namespaces\]\]/.test(toml)) {
   const out = wrangler(['kv', 'namespace', 'create', 'SUBS'])
   const id = /([0-9a-f]{32})/.exec((out.stdout ?? '') + (out.stderr ?? ''))?.[1]
   if (!id) {
     console.error(out.stdout, out.stderr)
     throw new Error('Could not create the KV namespace (see output above).')
   }
-  toml = toml.replace(/^id = ""/m, `id = "${id}"`)
+  toml = toml.trimEnd() + `\n\n[[kv_namespaces]]\nbinding = "SUBS"\nid = "${id}"\n`
   writeFileSync(TOML, toml)
   console.log(`  created (${id})`)
 } else console.log('  already set')

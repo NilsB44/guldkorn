@@ -13,12 +13,13 @@ ALLOWED_ORIGIN = "https://nilsb44.github.io"
 # Contact for Apple/Google push services if something goes wrong (sent with every push).
 # A URL keeps your email private; "mailto:you@example.com" also works.
 VAPID_SUBJECT = "https://nilsb44.github.io/guldkorn/"
-VAPID_PUBLIC_KEY = "" # filled in by `npm run setup`
-
-# Filled in by `npm run setup` (creates the KV namespace).
-[[kv_namespaces]]
-binding = "SUBS"
-id = ""
+VAPID_PUBLIC_KEY = "BM_v2yRJk8qsHY238Ly0Lsyt8onOVCNbgo2V6wif9_h8DugYX5sYhmuTgjpnI7jeT5Dha_Xt4jxGDlKFCMpy_Uc" # filled in by `npm run setup`
 
 [observability]
 enabled = true
+
+# The KV namespace (storage for subscriptions) is appended below by `npm run setup`.
+
+[[kv_namespaces]]
+binding = "SUBS"
+id = "532e9861f5144df7b31ee650f79da578"

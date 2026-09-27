@@ -12,7 +12,7 @@ export const config = {
 
   // URL of the push-notification Worker (see push-server/README.md), e.g.
   // 'https://guldkorn-push.<your-account>.workers.dev'. Empty = push reminders hidden.
-  pushServerUrl: '',
+  pushServerUrl: 'https://guldkorn-push.guldkorn-push.workers.dev',
 
   // Defaults for a fresh install (all editable in Inställningar).
   defaults: {
