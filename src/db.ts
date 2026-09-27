@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { config, type AlbumSize } from './config'
+import { config, type AlbumSize, type PickMode } from './config'
 
 // Everything is stored locally in the browser's IndexedDB. Nothing is ever uploaded.
 
@@ -55,6 +55,7 @@ export interface Settings {
   albumSize: AlbumSize
   reminderWeekday: number
   reminderTime: string
+  pickMode: PickMode
 }
 
 class GuldkornDB extends Dexie {

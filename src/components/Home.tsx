@@ -6,7 +6,8 @@ import { db, photosInRange, useSettings } from '../db'
 import { ensureAlbums, findAutoAlbum } from '../lib/albums'
 import { albumGoal, albumRange, cadenceLabel, cadenceUnit, computeStreak, formatRange, formatToday, roundStatus } from '../lib/dates'
 import type { Go } from '../nav'
-import { isIos, isStandalone, ProgressBar, Thumb } from './ui'
+import { isIos, isStandalone } from '../lib/platform'
+import { ProgressBar, Thumb } from './ui'
 
 export default function Home({ go }: { go: Go }) {
   const settings = useSettings()
@@ -22,7 +23,9 @@ export default function Home({ go }: { go: Go }) {
   }, [settings.albumSize])
 
   const lastEnd = rounds.length ? Math.max(...rounds.map((r) => r.periodEnd)) : undefined
-  const status = roundStatus(lastEnd, settings.cadenceDays, now)
+  const status = roundStatus(lastEnd, settings.cadenceDays, now, { weekday: settings.reminderWeekday, time: settings.reminderTime })
+  const nextText =
+    status.daysLeft === 0 ? `Nästa urval idag kl ${settings.reminderTime}` : status.daysLeft === 1 ? 'Nästa urval imorgon' : `Nästa urval om ${status.daysLeft} dagar`
   const streak = computeStreak(rounds.map((r) => r.completedAt), settings.cadenceDays, config.streakGraceDays, now)
   const goal = albumGoal(range.start, range.end, settings.cadenceDays, settings.picksPerRound)
   const label = cadenceLabel(settings.cadenceDays)
@@ -50,7 +53,7 @@ export default function Home({ go }: { go: Go }) {
                 ? 'Välj dina första guldkorn'
                 : status.isDue
                   ? `Dags att välja! ✨`
-                  : `Nästa urval om ${status.daysLeft} ${status.daysLeft === 1 ? 'dag' : 'dagar'}`}
+                  : nextText}
             </h2>
           </div>
           {streak > 0 && (

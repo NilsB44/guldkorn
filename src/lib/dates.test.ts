@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { albumGoal, albumRange, cadenceLabel, computeStreak, DAY, formatRange, isoWeek, roundStatus } from './dates'
+import { albumGoal, albumRange, cadenceLabel, computeStreak, DAY, formatRange, isoWeek, nextReminderAt, roundStatus } from './dates'
 
 const t = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime()
 
@@ -45,6 +45,38 @@ describe('roundStatus', () => {
     expect(roundStatus(last, 7, t(2026, 9, 24)).isDue).toBe(false)
     expect(roundStatus(last, 7, t(2026, 9, 24)).daysLeft).toBe(3)
     expect(roundStatus(last, 7, t(2026, 9, 27, 0)).isDue).toBe(true)
+  })
+})
+
+describe('reminder-aligned due time', () => {
+  const sunday19 = { weekday: 0, time: '19:00' }
+
+  it('snaps to the reminder weekday', () => {
+    // Done Sunday evening → due next Sunday 19:00
+    expect(roundStatus(t(2026, 9, 20, 21), 7, t(2026, 9, 22), sunday19).dueAt).toBe(t(2026, 9, 27, 19))
+    // Done a day late (Monday) → still next Sunday, not the one after
+    expect(roundStatus(t(2026, 9, 21, 10), 7, t(2026, 9, 22), sunday19).dueAt).toBe(t(2026, 9, 27, 19))
+  })
+
+  it('monthly → first reminder weekday around the month mark', () => {
+    expect(roundStatus(t(2026, 10, 5, 12), 30, t(2026, 10, 6), sunday19).dueAt).toBe(t(2026, 11, 1, 19))
+  })
+
+  it('short cadence → reminder time on the due day', () => {
+    expect(roundStatus(t(2026, 9, 20, 9), 3, t(2026, 9, 21), sunday19).dueAt).toBe(t(2026, 9, 23, 19))
+  })
+
+  it('next push = due time, or next slot if already overdue', () => {
+    const s = roundStatus(t(2026, 9, 20, 21), 7, t(2026, 9, 22), sunday19)
+    expect(nextReminderAt(s, 7, sunday19, t(2026, 9, 22))).toBe(t(2026, 9, 27, 19))
+    const overdue = roundStatus(t(2026, 9, 6, 21), 7, t(2026, 9, 22), sunday19)
+    expect(overdue.isDue).toBe(true)
+    expect(nextReminderAt(overdue, 7, sunday19, t(2026, 9, 22))).toBe(t(2026, 9, 27, 19))
+  })
+
+  it('first round (nothing done yet) → next slot, not immediately', () => {
+    const first = roundStatus(undefined, 7, t(2026, 9, 22, 10), sunday19)
+    expect(nextReminderAt(first, 7, sunday19, t(2026, 9, 22, 10))).toBe(t(2026, 9, 27, 19))
   })
 })
 

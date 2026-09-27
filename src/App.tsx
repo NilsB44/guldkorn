@@ -1,4 +1,8 @@
+import { useEffect } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Home as HomeIcon, Images, Settings as SettingsIcon } from 'lucide-react'
+import { db, useSettings } from './db'
+import { syncPush } from './lib/push'
 import { useNavigation, type View } from './nav'
 import Home from './components/Home'
 import Round from './components/Round'
@@ -9,6 +13,7 @@ import Settings from './components/Settings'
 
 export default function App() {
   const { view, go, back } = useNavigation()
+  usePushSync()
 
   const page = (() => {
     switch (view.name) {
@@ -35,6 +40,22 @@ export default function App() {
       {showTabs && <TabBar current={view} go={go} />}
     </div>
   )
+}
+
+/**
+ * Keeps the push server's "next reminder" in step with the schedule: on app open,
+ * after each round and whenever the reminder settings change. Also clears the icon badge.
+ */
+function usePushSync() {
+  const s = useSettings()
+  const lastRound = useLiveQuery(async () => (await db.rounds.orderBy('completedAt').last())?.id ?? 'none')
+  useEffect(() => {
+    navigator.clearAppBadge?.().catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (lastRound === undefined) return // still loading
+    syncPush().catch((err) => console.warn('Push sync failed', err))
+  }, [lastRound, s.cadenceDays, s.reminderWeekday, s.reminderTime])
 }
 
 function TabBar({ current, go }: { current: View; go: (v: View) => void }) {

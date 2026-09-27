@@ -15,8 +15,12 @@ UI copy is **Swedish**. Code and comments are English.
 Run `npm test` and `npm run test:e2e` before committing.
 
 ## Hard rules
-- **Privacy:** no network requests to other hosts: no CDNs, web fonts, analytics or APIs. The CSP in
-  `vite.config.ts` enforces this, and the e2e test fails on any external request. Add libraries via npm only.
+- **Privacy:** no network requests to other hosts: no CDNs, web fonts, analytics or APIs. The one
+  exception is the push Worker (`config.pushServerUrl`), which only ever receives the push subscription
+  and reminder schedule and text, never photos or personal data. The CSP in `vite.config.ts` enforces this,
+  and the e2e test fails on any external request. Add libraries via npm only.
+- A web app can't read the iOS photo library directly. Photos come only from `<input type="file">`
+  (the system picker). Don't promise "access all photos" without going native.
 - **Store images as ArrayBuffer, never Blob,** in IndexedDB. WebKit sometimes fails to store Blobs.
   Use `jpegBlob()` from `db.ts` to turn stored bytes back into a Blob.
 - **No `confirm()`/`alert()`.** Use `ConfirmButton` (two taps) from `components/ui.tsx`.
@@ -36,3 +40,11 @@ Run `npm test` and `npm run test:e2e` before committing.
 - Theme tokens are in the `@theme` block of `src/index.css`. Personal defaults are in `src/config.ts`.
 - Navigation: `nav.ts` (history.pushState, no router, so it works on static hosting under any base path).
 - Deploy: `.github/workflows/deploy.yml` → GitHub Pages with `BASE_PATH=/<repo>/`.
+  Live at https://nilsb44.github.io/guldkorn/
+- Push: `src/lib/push.ts` (client), `public/push-sw.js` (service-worker push/click handlers, pulled in via
+  workbox `importScripts`), `push-server/` (Cloudflare Worker + KV + 15-minute cron; `npm test` and
+  `npm run deploy` inside that folder). The app computes `nextAt` (`reminderPayload`) and syncs it on open,
+  after rounds and on settings changes (`usePushSync` in App.tsx). Due time snaps to the reminder weekday/time
+  (`roundStatus(..., reminder)`).
+- Round flow: picked files are auto-filtered to the current period (`inPeriod`), with older ones in `hiddenOlder`.
+  `pickMode: 'direct'` skips swiping.

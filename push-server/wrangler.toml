@@ -1,0 +1,24 @@
+name = "guldkorn-push"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Check for due reminders every 15 minutes (free plan allows this easily).
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+# The site the app is served from (no trailing slash). Comma-separate to add
+# http://localhost:5173 while testing locally.
+ALLOWED_ORIGIN = "https://nilsb44.github.io"
+# Contact for Apple/Google push services if something goes wrong (sent with every push).
+# A URL keeps your email private; "mailto:you@example.com" also works.
+VAPID_SUBJECT = "https://nilsb44.github.io/guldkorn/"
+VAPID_PUBLIC_KEY = "" # filled in by `npm run setup`
+
+# Filled in by `npm run setup` (creates the KV namespace).
+[[kv_namespaces]]
+binding = "SUBS"
+id = ""
+
+[observability]
+enabled = true

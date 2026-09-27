@@ -52,6 +52,7 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
   const [step, setStep] = useState<Step>('pick')
   const [notice, setNotice] = useState('')
   const [candidates, setCandidates] = useState<Candidate[]>([])
+  const [hiddenOlder, setHiddenOlder] = useState<Candidate[]>([])
   const [index, setIndex] = useState(0)
   const [kept, setKept] = useState<Set<string>>(new Set())
   const [decided, setDecided] = useState<string[]>([])
@@ -84,11 +85,27 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
     const dupes = files.length - fresh.length
     if (dupes) setNotice(`${dupes} ${dupes === 1 ? 'bild var' : 'bilder var'} redan sparade och hoppas över.`)
     if (!fresh.length) return setStep('pick')
-    setCandidates(fresh)
+
+    // Auto-filter to the period (unless everything picked is older — then she meant it).
+    const inPeriod = fresh.filter((c) => c.inPeriod)
+    const older = inPeriod.length ? fresh.filter((c) => !c.inPeriod) : []
+    setHiddenOlder(older)
+    setCandidates(inPeriod.length ? inPeriod : fresh)
     setIndex(0)
-    setKept(new Set())
     setDecided([])
-    setStep('swipe')
+    if (settings.pickMode === 'direct') {
+      setKept(new Set((inPeriod.length ? inPeriod : fresh).map((c) => c.key)))
+      setStep('review')
+    } else {
+      setKept(new Set())
+      setStep('swipe')
+    }
+  }
+
+  function showOlder() {
+    setCandidates([...candidates, ...hiddenOlder])
+    if (settings.pickMode === 'direct') setKept(new Set([...kept, ...hiddenOlder.map((c) => c.key)]))
+    setHiddenOlder([])
   }
 
   function decide(keep: boolean) {
@@ -205,16 +222,27 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
         <div className="flex flex-1 flex-col">
           <p className="label mt-4">{cadenceLabel(settings.cadenceDays)}</p>
           <h1 className="title mt-2">{periodText}</h1>
-          <ol className="mt-8 space-y-5">
-            <Li n={1}>
-              Välj bilderna från <strong>{periodText}</strong> i bildväljaren.
-              <span className="mt-1 block text-sm text-muted">Tips: dra fingret över bilderna för att markera många på en gång.</span>
-            </Li>
-            <Li n={2}>Svep höger för att behålla, vänster för att hoppa över.</Li>
-            <Li n={3}>
-              Spara dina <strong>{target} bästa</strong> — de hamnar automatiskt i rätt album.
-            </Li>
-          </ol>
+          {settings.pickMode === 'swipe' ? (
+            <ol className="mt-8 space-y-5">
+              <Li n={1}>
+                Markera alla bilder från <strong>{periodText}</strong> i ett svep.
+                <span className="mt-1 block text-sm text-muted">
+                  Dra fingret över rutnätet, de senaste ligger överst. Råkar du ta med äldre bilder sorteras de bort automatiskt.
+                </span>
+              </Li>
+              <Li n={2}>Svep höger för att behålla, vänster för att hoppa över.</Li>
+              <Li n={3}>
+                Spara dina <strong>{target} bästa</strong>. De hamnar automatiskt i rätt album.
+              </Li>
+            </ol>
+          ) : (
+            <ol className="mt-8 space-y-5">
+              <Li n={1}>
+                Välj dina <strong>{target} bästa</strong> bilder från <strong>{periodText}</strong> direkt i bildväljaren.
+              </Li>
+              <Li n={2}>Kolla igenom och spara. De hamnar automatiskt i rätt album.</Li>
+            </ol>
+          )}
           {notice && <p className="mt-6 rounded-2xl bg-accent-soft p-3 text-sm">{notice}</p>}
           <div className="mt-auto pt-8">
             <label className="btn-primary w-full cursor-pointer py-4 text-lg">
@@ -248,6 +276,14 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
           <ProgressBar value={index / candidates.length} className="mt-1" />
           <p className="mt-2 text-center text-xs text-muted">
             {index + 1} av {candidates.length}
+            {hiddenOlder.length > 0 && (
+              <>
+                {' · '}
+                <button className="underline" onClick={showOlder}>
+                  {hiddenOlder.length} äldre dolda – visa
+                </button>
+              </>
+            )}
           </p>
           <div className="relative mt-3 flex-1">
             {candidates[index + 1] && (
@@ -276,6 +312,11 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
             {kept.size} valda{kept.size > target ? ` — lite fler än målet ${target}, helt okej!` : ''}. Tryck på en bild för att ändra.
           </p>
           {notice && <p className="mt-3 rounded-2xl bg-accent-soft p-3 text-sm">{notice}</p>}
+          {hiddenOlder.length > 0 && (
+            <button className="mt-3 text-left text-sm text-muted underline" onClick={showOlder}>
+              {hiddenOlder.length} bilder var äldre än perioden och sorterades bort – visa dem
+            </button>
+          )}
           <div className="mt-4 grid grid-cols-3 gap-1.5">
             {candidates.map((c) => {
               const on = kept.has(c.key)

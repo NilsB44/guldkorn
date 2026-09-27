@@ -55,6 +55,12 @@ It's not a real iOS device, though. Try it once on any iPhone before you give it
 
 Alternative: `npm run build` and drag the `dist` folder onto https://app.netlify.com/drop.
 
+## Push reminders
+
+One-time: follow [`push-server/README.md`](push-server/README.md) (a free Cloudflare account, then `npm run setup`),
+put the printed URL in `src/config.ts` → `pushServerUrl`, then commit and push.
+On her phone: Inställningar → Påminnelse → **Slå på påminnelser** → Tillåt, then **Skicka testnotis**.
+
 ## Giving it to her 🎁
 
 Open the link **in Safari** on her iPhone → **Dela** (share icon) → **Lägg till på hemskärmen**.
@@ -67,8 +73,8 @@ Personalise first: set her name in `src/config.ts` (`recipientName`), or she can
 
 | Topic | How it works |
 |---|---|
-| Picking photos | The web can't browse the photo library by date on its own. She picks photos in the normal iOS picker (drag a finger to select many). The app reads each photo's EXIF date, sorts them, flags ones older than the period and skips photos she has already saved. |
-| Reminders | Web push would need a server, so there's none. Inställningar → **Lägg till i kalendern** creates a recurring calendar event with an alarm, generated on the phone. The app also shows when the next round is due. |
+| Picking photos | iOS never lets a web app read the whole photo library; the only way in is the system photo picker, and only a native App Store app could ask "allow access to all photos". So it's one gesture: in the picker she drags a finger over the recent photos, and the app **auto-filters to the current period** by EXIF date (older ones are hidden, with a "visa ändå" link) and skips photos already saved. Or, with **Direkt** mode in Inställningar, she picks her favourites straight in the picker and skips swiping. |
+| Reminders | **Push notifications** via a tiny free Cloudflare Worker (`push-server/`, see its README). It sends a notification at her chosen weekday/time when a round is due; the icon gets a badge until she opens the app. Needs iOS 16.4+ and the app on the home screen. Fallback: **Lägg till i kalendern** (a recurring calendar alarm). |
 | Storage | Home-screen apps aren't subject to Safari's 7-day cleanup, and the app asks for persistent storage. Photos are saved at ≤3000 px (≈300 dpi for a photo book page) as JPEG. |
 | Backup | Everything lives only on the phone. Inställningar → **Säkerhetskopia** makes a .zip (photos + captions + albums) she can save to Filer/iCloud, and **Återställ** restores it. Suggest she does this now and then. |
 | Photo book | Pick a format (21×21 square, A4 landscape/portrait) and a layout (auto or 1–4 photos per page). Tapping a photo in an album lets her add a caption, and captioned photos get their own page. The PDF is 300 dpi. Many print services also accept the plain images via **Exportera** → "Spara i Bilder". |
@@ -84,6 +90,11 @@ src/
   components/          ← Home, Round (swipe flow), Albums, AlbumDetail, BookView, Settings, ui
   lib/                 ← dates/streaks, images (EXIF + resize), book layout, pdf, backup, calendar, share
 e2e/                   ← Playwright tests
+public/push-sw.js      ← notification handling in the service worker
+push-server/           ← Cloudflare Worker that sends the reminders (separate npm project)
 ```
+
+On Windows, if `npm` gives "running scripts is disabled", run once:
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (or use `npm.cmd` instead of `npm`).
 
 Restyling: change the colours in `src/index.css` and everything follows.

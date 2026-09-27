@@ -74,19 +74,54 @@ export interface RoundStatus {
   isFirst: boolean
 }
 
-/** When the next "urval" is due, and which period of photos it covers. */
-export function roundStatus(lastPeriodEnd: number | undefined, cadenceDays: number, now: number): RoundStatus {
+export interface ReminderSlot {
+  weekday: number // 0 = Sunday
+  time: string // "HH:MM"
+}
+
+/** First moment ≥ t at `time` — on `weekday`, or on any day if weekday is undefined. */
+export function slotOnOrAfter(t: number, time: string, weekday?: number): number {
+  const [h, m] = time.split(':').map(Number)
+  const d = new Date(t)
+  const slot = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m)
+  if (slot.getTime() < t) slot.setDate(slot.getDate() + 1)
+  if (weekday !== undefined) slot.setDate(slot.getDate() + ((weekday - slot.getDay() + 7) % 7))
+  return slot.getTime()
+}
+
+/**
+ * When the next "urval" is due, and which period of photos it covers.
+ * With a reminder slot, the due time snaps to the reminder (e.g. "Sundays 19:00"):
+ * for weekly+ cadences, the first reminder weekday within a few days of the raw due date.
+ */
+export function roundStatus(lastPeriodEnd: number | undefined, cadenceDays: number, now: number, reminder?: ReminderSlot): RoundStatus {
   if (lastPeriodEnd === undefined) {
     return { periodStart: startOfDay(addDays(now, -cadenceDays)), dueAt: now, isDue: true, daysLeft: 0, isFirst: true }
   }
-  const dueAt = addDays(startOfDay(lastPeriodEnd), cadenceDays)
+  const rawDue = addDays(startOfDay(lastPeriodEnd), cadenceDays)
+  let dueAt = rawDue
+  if (reminder) {
+    dueAt =
+      cadenceDays >= 7
+        ? slotOnOrAfter(addDays(rawDue, -Math.min(3, Math.floor(cadenceDays / 2))), reminder.time, reminder.weekday)
+        : slotOnOrAfter(rawDue, reminder.time)
+  }
   return {
     periodStart: lastPeriodEnd,
     dueAt,
     isDue: now >= dueAt,
-    daysLeft: Math.max(0, Math.ceil((dueAt - now) / DAY)),
+    daysLeft: Math.max(0, Math.ceil((startOfDay(dueAt) - startOfDay(now)) / DAY)),
     isFirst: false,
   }
+}
+
+/**
+ * When the next push reminder should go out: the due time, or — if the round is
+ * already due/overdue — the next reminder slot (at most a week away, as a gentle nudge).
+ */
+export function nextReminderAt(status: RoundStatus, cadenceDays: number, reminder: ReminderSlot, now: number): number {
+  if (status.dueAt > now) return status.dueAt
+  return slotOnOrAfter(now + 60_000, reminder.time, cadenceDays >= 7 ? reminder.weekday : undefined)
 }
 
 /** Number of rounds in a row completed roughly on schedule. 0 if the chain is broken. */
@@ -141,6 +176,10 @@ export function formatRange(start: number, end: number, exclusiveEnd = false): s
 
 export function formatDate(t: number): string {
   return fullDate.format(t)
+}
+
+export function formatDateTime(t: number): string {
+  return capitalize(new Intl.DateTimeFormat('sv-SE', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(t))
 }
 
 export function formatToday(t: number): string {

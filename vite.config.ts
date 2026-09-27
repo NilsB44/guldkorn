@@ -6,15 +6,16 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { config } from './src/config.ts'
 
 // Strict Content-Security-Policy: the built app may only load its own files and
-// may not talk to any other server. This is what guarantees that photos never
-// leave the phone. Only added to production builds (Vite dev needs inline scripts).
+// may only talk to its own push-reminder server. This is what guarantees that photos
+// never leave the phone. Only added to production builds (Vite dev needs inline scripts).
+const pushOrigin = config.pushServerUrl ? new URL(config.pushServerUrl).origin : ''
 const csp = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  `connect-src 'self' ${pushOrigin}`.trim(),
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -61,6 +62,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        importScripts: ['push-sw.js'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
     }),

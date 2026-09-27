@@ -69,7 +69,7 @@ test('full weekly round → album → photo book PDF', async ({ page }) => {
   // Home now shows progress and the round is no longer due.
   // (New URL: going to the same URL is a reload, which keeps the current view.)
   await page.goto('/?reopen')
-  await expect(page.getByRole('heading', { name: /Nästa urval om 7 dagar/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Nästa urval/ })).toBeVisible()
   await expect(page.getByText('guldkorn totalt')).toBeVisible()
 })
 
@@ -88,6 +88,19 @@ test('same photos are not saved twice', async ({ page }) => {
       await expect(page.getByText('2 bilder var redan sparade')).toBeVisible()
     }
   }
+})
+
+test('direct mode skips swiping', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Inställningar' }).click()
+  await page.getByRole('button', { name: 'Direkt (snabbt)' }).click()
+  await expect(page.getByText(/Välj dina favoriter direkt/)).toBeVisible()
+  await page.getByRole('button', { name: 'Hem' }).click()
+  await page.getByRole('button', { name: 'Starta urvalet' }).click()
+  await page.getByTestId('file-input').setInputFiles(await makePhotos(page, 3))
+  await expect(page.getByRole('heading', { name: 'Dina guldkorn' })).toBeVisible()
+  await page.getByRole('button', { name: 'Spara 3 guldkorn' }).click()
+  await expect(page.getByRole('heading', { name: '3 nya guldkorn!' })).toBeVisible({ timeout: 20_000 })
 })
 
 test('settings persist', async ({ page }) => {

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CalendarPlus, Download, Lock, Upload } from 'lucide-react'
-import { config, type AlbumSize } from '../config'
+import { Bell, BellRing, CalendarPlus, Download, Lock, Upload } from 'lucide-react'
+import { config, type AlbumSize, type PickMode } from '../config'
 import { clearAllData, db, saveSettings, useSettings } from '../db'
 import { createBackup, restoreBackup } from '../lib/backup'
 import { buildReminderIcs } from '../lib/calendar'
-import { cadenceLabel } from '../lib/dates'
+import { cadenceLabel, formatDateTime } from '../lib/dates'
+import { currentPayload, disablePush, enablePush, pushState, sendTestPush, type PushState } from '../lib/push'
 import { seedDemoData } from '../lib/demo'
 import { shareFiles } from '../lib/share'
 import { ConfirmButton, Header, Segmented } from './ui'
@@ -92,7 +93,25 @@ export default function Settings() {
           />
         </Section>
 
-        <Section title="Påminnelse" hint="Lägger en återkommande händelse med larm i din kalender.">
+        <Section
+          title="Så väljer du"
+          hint={
+            s.pickMode === 'swipe'
+              ? 'Markera veckans bilder i bildväljaren (dra fingret över dem), sedan sveper du fram favoriterna.'
+              : 'Välj dina favoriter direkt i bildväljaren – de sparas utan svepsteg.'
+          }
+        >
+          <Segmented<PickMode>
+            options={[
+              { value: 'swipe', label: 'Svep (roligt)' },
+              { value: 'direct', label: 'Direkt (snabbt)' },
+            ]}
+            value={s.pickMode}
+            onChange={(v) => saveSettings({ pickMode: v })}
+          />
+        </Section>
+
+        <Section title="Påminnelse">
           <div className="flex gap-2">
             <select className="flex-1 rounded-xl border border-line bg-card px-3 py-3" value={s.reminderWeekday} onChange={(e) => saveSettings({ reminderWeekday: Number(e.target.value) })}>
               {WEEKDAYS.map((d, i) => (
@@ -103,8 +122,9 @@ export default function Settings() {
             </select>
             <input type="time" className="rounded-xl border border-line bg-card px-3 py-3" value={s.reminderTime} onChange={(e) => saveSettings({ reminderTime: e.target.value || '19:00' })} />
           </div>
+          <PushControls />
           <button
-            className="btn-secondary mt-3 w-full"
+            className="btn-ghost mt-2 w-full text-sm"
             onClick={() => {
               const ics = buildReminderIcs({
                 appName: config.appName,
@@ -117,7 +137,7 @@ export default function Settings() {
               shareFiles([new File([ics], 'guldkorn-paminnelse.ics', { type: 'text/calendar' })], 'Påminnelse')
             }}
           >
-            <CalendarPlus size={18} /> Lägg till i kalendern
+            <CalendarPlus size={16} /> Lägg till i kalendern i stället
           </button>
         </Section>
 
@@ -201,6 +221,66 @@ export default function Settings() {
           {config.appName} · gjord med kärlek ♥
         </p>
       </div>
+    </div>
+  )
+}
+
+const PUSH_INFO: Partial<Record<PushState, string>> = {
+  'install-first': 'Lägg till appen på hemskärmen och öppna den därifrån för att kunna få notiser.',
+  unsupported: 'Den här webbläsaren kan inte ta emot notiser.',
+  denied: 'Notiser är blockerade. Slå på dem i iPhone-inställningar → Notiser → Guldkorn.',
+}
+
+function PushControls() {
+  const [state, setState] = useState<PushState>()
+  const [busy, setBusy] = useState(false)
+  const [info, setInfo] = useState('')
+  const settings = useSettings()
+  const next = useLiveQuery(async () => (state === 'on' ? (await currentPayload()).nextAt : undefined), [state, settings])
+
+  useEffect(() => {
+    pushState().then(setState)
+  }, [])
+
+  const run = (fn: () => Promise<unknown>, done?: string) => async () => {
+    setBusy(true)
+    setInfo('')
+    try {
+      await fn()
+      if (done) setInfo(done)
+    } catch (err) {
+      setInfo(err instanceof Error ? err.message : String(err))
+    }
+    setState(await pushState())
+    setBusy(false)
+  }
+
+  if (!state || state === 'unconfigured') return null
+  return (
+    <div className="card mt-3 space-y-3 p-4">
+      {state === 'on' ? (
+        <>
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <BellRing size={16} className="text-keep" /> Påminnelser är på
+          </p>
+          {next && <p className="text-sm text-muted">Nästa: {formatDateTime(next)}</p>}
+          <div className="flex gap-2">
+            <button className="btn-secondary flex-1 py-2 text-sm" disabled={busy} onClick={run(sendTestPush, 'Testnotis skickad – den kommer om några sekunder.')}>
+              Skicka testnotis
+            </button>
+            <button className="btn-ghost py-2 text-sm" disabled={busy} onClick={run(disablePush)}>
+              Stäng av
+            </button>
+          </div>
+        </>
+      ) : state === 'off' ? (
+        <button className="btn-primary w-full" disabled={busy} onClick={run(enablePush, 'Klart! Du får en notis när det är dags.')}>
+          <Bell size={18} /> Slå på påminnelser
+        </button>
+      ) : (
+        <p className="text-sm text-muted">{PUSH_INFO[state]}</p>
+      )}
+      {info && <p className="text-sm text-muted">{info}</p>}
     </div>
   )
 }
