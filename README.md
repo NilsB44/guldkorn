@@ -9,6 +9,10 @@ print-ready photo book PDF (or as plain images) for Önskefoto, CEWE, Photobox a
   data is stripped when photos are saved.
 - **Installable on iPhone** as a home-screen app (PWA). No App Store needed.
 - **Gamified:** a weekly "urval" with swipe cards, a target number, a streak 🔥, confetti and milestones.
+- **Smart:** look-alike shots are grouped and the sharpest, best-exposed one is suggested. Photos get their
+  place ("Visby"), time of day and camera, all worked out on the phone with no network.
+- **Native app too:** the same code as an iPhone/Android app that can read **all photos** with permission,
+  so the week's photos are fetched automatically. See **[NATIVE.md](NATIVE.md)**.
 
 UI language: Swedish.
 

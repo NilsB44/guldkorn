@@ -1,4 +1,5 @@
 import { test } from '@playwright/test'
+import { makeSimilarPhotos } from './photos'
 
 // `npm run screenshots` → saves iPhone-sized screenshots of the main screens to ./screenshots
 // (handy to review design changes without a phone). Skipped in the normal test run.
@@ -53,4 +54,11 @@ test('screenshots', async ({ page }, info) => {
   await page.getByTestId('file-input').setInputFiles(files.map((b, i) => ({ name: `s${i}.jpg`, mimeType: 'image/jpeg', buffer: Buffer.from(b, 'base64') })))
   await page.getByRole('button', { name: 'Behåll' }).click()
   await shot('8-swipe')
+
+  // Duplicate picker
+  await page.goto('/?dev&dupes')
+  await page.getByRole('button', { name: /Gör ett extra urval|Starta urvalet/ }).click()
+  await page.getByTestId('file-input').setInputFiles(await makeSimilarPhotos(page))
+  await page.getByRole('heading', { name: 'Välj den bästa' }).waitFor({ timeout: 20_000 })
+  await shot('9-duplicates')
 })
