@@ -40,7 +40,7 @@ export default defineConfig({
     contentSecurityPolicy(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: 'script',
+      injectRegister: false, // registered in main.tsx (web only — the native app bundles its files)
       includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'icon.svg'],
       manifest: {
         name: config.appName,

@@ -178,6 +178,24 @@ export function formatDate(t: number): string {
   return fullDate.format(t)
 }
 
+const TIMES_OF_DAY = [
+  { until: 5, label: 'natt', emoji: '🌙' },
+  { until: 10, label: 'morgon', emoji: '🌅' },
+  { until: 12, label: 'förmiddag', emoji: '☀️' },
+  { until: 17, label: 'eftermiddag', emoji: '🌤️' },
+  { until: 22, label: 'kväll', emoji: '🌆' },
+  { until: 24, label: 'natt', emoji: '🌙' },
+]
+
+export function timeOfDay(t: number): { label: string; emoji: string } {
+  const hour = new Date(t).getHours()
+  return TIMES_OF_DAY.find((s) => hour < s.until)!
+}
+
+export function formatTime(t: number): string {
+  return new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit' }).format(t)
+}
+
 export function formatDateTime(t: number): string {
   return capitalize(new Intl.DateTimeFormat('sv-SE', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(t))
 }

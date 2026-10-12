@@ -1,11 +1,41 @@
-// Push reminders via the tiny Worker in /push-server.
-// What the server gets: the phone's anonymous push address + when to send the next
-// reminder + its text. Never photos, names or anything else.
+// Reminders.
+//  • Web/PWA: push via the tiny Worker in /push-server. What the server gets: the phone's
+//    anonymous push address + when to send the next reminder + its text. Never photos or names.
+//  • Native app: local notifications scheduled on the phone itself — no server at all.
 
 import { config } from '../config'
 import { db, getSettings, type Settings } from '../db'
-import { cadenceLabel, nextReminderAt, roundStatus } from './dates'
+import { cadenceLabel, DAY, nextReminderAt, roundStatus } from './dates'
+import { isNative } from './native'
 import { isIos, isStandalone } from './platform'
+
+// ── Native: local notifications ────────────────────────────────────────────────
+const NATIVE_IDS = Array.from({ length: 8 }, (_, i) => 101 + i)
+const localNotifications = () => import('@capacitor/local-notifications').then((m) => m.LocalNotifications)
+
+async function nativeState(): Promise<PushState> {
+  const ln = await localNotifications()
+  const { display } = await ln.checkPermissions()
+  if (display === 'denied') return 'denied'
+  if (display !== 'granted') return 'off'
+  const { notifications } = await ln.getPending()
+  return notifications.some((n) => NATIVE_IDS.includes(n.id)) ? 'on' : 'off'
+}
+
+/** Schedules the next reminder plus a few gentle repeats (re-planned every time the app opens). */
+async function nativeSchedule(): Promise<void> {
+  const ln = await localNotifications()
+  const p = await currentPayload()
+  await ln.cancel({ notifications: NATIVE_IDS.map((id) => ({ id })) })
+  await ln.schedule({
+    notifications: NATIVE_IDS.map((id, k) => ({
+      id,
+      title: p.title,
+      body: p.body,
+      schedule: { at: new Date(p.nextAt + k * p.repeatDays * DAY), allowWhileIdle: true },
+    })),
+  })
+}
 
 export type PushState = 'unconfigured' | 'install-first' | 'unsupported' | 'denied' | 'off' | 'on'
 
@@ -59,6 +89,7 @@ async function currentSubscription() {
 }
 
 export async function pushState(): Promise<PushState> {
+  if (isNative()) return nativeState()
   if (!base) return 'unconfigured'
   // iPhone only allows notifications for apps added to the home screen.
   if (isIos() && !isStandalone()) return 'install-first'
@@ -69,6 +100,11 @@ export async function pushState(): Promise<PushState> {
 
 /** Must be called straight from a tap (iOS requires a user gesture for the permission prompt). */
 export async function enablePush(): Promise<void> {
+  if (isNative()) {
+    const { display } = await (await localNotifications()).requestPermissions()
+    if (display !== 'granted') throw new Error('Du behöver tillåta notiser för att få påminnelser.')
+    return nativeSchedule()
+  }
   const permission = await Notification.requestPermission()
   if (permission !== 'granted') throw new Error('Du behöver tillåta notiser för att få påminnelser.')
   const reg = await Promise.race([
@@ -91,6 +127,11 @@ export async function enablePush(): Promise<void> {
 
 /** Tells the server when the next reminder is due. Call whenever schedule or rounds change. */
 export async function syncPush(): Promise<boolean> {
+  if (isNative()) {
+    if ((await nativeState()) !== 'on') return false
+    await nativeSchedule()
+    return true
+  }
   if (!base) return false
   const subscription = await currentSubscription()
   if (!subscription) return false
@@ -99,6 +140,10 @@ export async function syncPush(): Promise<boolean> {
 }
 
 export async function disablePush(): Promise<void> {
+  if (isNative()) {
+    await (await localNotifications()).cancel({ notifications: NATIVE_IDS.map((id) => ({ id })) })
+    return
+  }
   const subscription = await currentSubscription()
   if (!subscription) return
   const { endpoint } = subscription
@@ -107,6 +152,12 @@ export async function disablePush(): Promise<void> {
 }
 
 export async function sendTestPush(): Promise<void> {
+  if (isNative()) {
+    await (await localNotifications()).schedule({
+      notifications: [{ id: 199, title: 'Det funkar! 🎉', body: 'Så här kommer påminnelserna att se ut.', schedule: { at: new Date(Date.now() + 3000) } }],
+    })
+    return
+  }
   const subscription = await currentSubscription()
   if (!subscription) throw new Error('Påminnelser är inte påslagna.')
   await api('POST', '/test', { endpoint: subscription.endpoint })

@@ -32,6 +32,10 @@ export interface LayoutPhoto {
   width: number
   height: number
   caption?: string
+  /** Generated caption (place · date) — doesn't get a page of its own like a written caption. */
+  autoCaption?: boolean
+  place?: string
+  takenAt?: number
 }
 
 export type BookPage =
@@ -85,10 +89,10 @@ export function layoutBook(photos: LayoutPhoto[], perPage: PerPage, title: strin
   while (i < photos.length) {
     let n = perPage === 'auto' ? AUTO_PATTERN[step++ % AUTO_PATTERN.length] : perPage
     if (perPage === 'auto') {
-      if (photos[i].caption) n = 1
+      if (photos[i].caption && !photos[i].autoCaption) n = 1
       else {
         // Stop before a captioned photo so it gets its own page.
-        const nextCaption = photos.slice(i, i + n).findIndex((p) => p.caption)
+        const nextCaption = photos.slice(i, i + n).findIndex((p) => p.caption && !p.autoCaption)
         if (nextCaption > 0) n = nextCaption
       }
     }
@@ -101,4 +105,12 @@ export function layoutBook(photos: LayoutPhoto[], perPage: PerPage, title: strin
     i += chunk.length
   }
   return pages
+}
+
+const shortDate = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' })
+
+/** "Visby · 12 okt." — automatic caption from the photo's metadata. */
+export function metaCaption(p: { place?: string; takenAt?: number }): string | undefined {
+  const parts = [p.place, p.takenAt ? shortDate.format(p.takenAt) : undefined].filter(Boolean)
+  return parts.length ? parts.join(' · ') : undefined
 }

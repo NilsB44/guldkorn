@@ -3,20 +3,36 @@ import { config } from '../config'
 
 export interface PhotoMeta {
   takenAt: number
-  dateSource: 'exif' | 'file'
+  dateSource: 'exif' | 'file' | 'library'
   fingerprint: string
+  lat?: number
+  lon?: number
+  camera?: string
 }
 
-/** Reads the capture date from EXIF. iPhone photos keep it when picked in Safari. */
+/**
+ * Reads capture date, GPS position and camera model from EXIF.
+ * Note: browsers often strip GPS from photos given to web pages (iOS Safari, Android Chrome);
+ * the native app reads the position from the photo library instead.
+ */
 export async function readMeta(file: File): Promise<PhotoMeta> {
   let takenAt: number | undefined
   let dateSource: PhotoMeta['dateSource'] = 'file'
+  let lat: number | undefined
+  let lon: number | undefined
+  let camera: string | undefined
   try {
-    const exif = await exifr.parse(file, { pick: ['DateTimeOriginal', 'CreateDate'] })
+    const exif = await exifr.parse(file, { pick: ['DateTimeOriginal', 'CreateDate', 'Make', 'Model'] })
     const date = exif?.DateTimeOriginal ?? exif?.CreateDate
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
       takenAt = date.getTime()
       dateSource = 'exif'
+    }
+    camera = cameraName(exif?.Make, exif?.Model)
+    const gps = await exifr.gps(file)
+    if (gps && Number.isFinite(gps.latitude) && Number.isFinite(gps.longitude)) {
+      lat = gps.latitude
+      lon = gps.longitude
     }
   } catch {
     // No EXIF (screenshots, some edited images) — fall back to file date.
@@ -24,7 +40,16 @@ export async function readMeta(file: File): Promise<PhotoMeta> {
   // Without EXIF the file date is just "when it was picked", so leave it out of the fingerprint.
   const fingerprint = dateSource === 'exif' ? `${file.name}|${file.size}|${takenAt}` : `${file.name}|${file.size}`
   takenAt ??= file.lastModified || Date.now()
-  return { takenAt, dateSource, fingerprint }
+  return { takenAt, dateSource, fingerprint, lat, lon, camera }
+}
+
+/** "Apple" + "iPhone 15 Pro" → "iPhone 15 Pro"; "samsung" + "SM-S918B" → "Samsung SM-S918B". */
+export function cameraName(make?: unknown, model?: unknown): string | undefined {
+  const mk = typeof make === 'string' ? make.trim() : ''
+  const md = typeof model === 'string' ? model.trim() : ''
+  if (!md) return mk || undefined
+  if (!mk || md.toLowerCase().startsWith(mk.toLowerCase()) || mk.toLowerCase() === 'apple') return md
+  return `${mk.charAt(0).toUpperCase()}${mk.slice(1).toLowerCase()} ${md}`
 }
 
 export async function loadImage(blob: Blob): Promise<HTMLImageElement> {

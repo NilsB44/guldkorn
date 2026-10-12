@@ -22,7 +22,12 @@ export const config = {
     reminderWeekday: 0, // 0 = söndag … 6 = lördag
     reminderTime: '19:00',
     pickMode: 'swipe' as PickMode, // swipe = pick a bunch, then swipe | direct = pick favourites straight away
+    findDuplicates: true, // group look-alike shots and suggest the best one
+    saveLocation: true, // keep GPS position + place name in the app (never in exported photos)
   },
+
+  // Place names: photos abroad get the country appended ("Barcelona, Spanien").
+  homeCountry: 'SE',
 
   // Days after the due date before a streak is considered broken.
   streakGraceDays: 2,

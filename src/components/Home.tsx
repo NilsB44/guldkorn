@@ -1,19 +1,25 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Flame, Share, Sparkles, ChevronRight } from 'lucide-react'
+import { Flame, Images, Share, Sparkles, ChevronRight } from 'lucide-react'
 import { config } from '../config'
 import { db, photosInRange, useSettings } from '../db'
 import { ensureAlbums, findAutoAlbum } from '../lib/albums'
 import { albumGoal, albumRange, cadenceLabel, cadenceUnit, computeStreak, formatRange, formatToday, roundStatus } from '../lib/dates'
 import type { Go } from '../nav'
+import { isNative, libraryAccess, requestLibraryAccess } from '../lib/native'
 import { isIos, isStandalone } from '../lib/platform'
-import { ProgressBar, Thumb } from './ui'
+import { ProgressBar, Sheet, Thumb } from './ui'
 
 export default function Home({ go }: { go: Go }) {
   const settings = useSettings()
   const now = Date.now()
   const rounds = useLiveQuery(() => db.rounds.orderBy('completedAt').toArray(), [], [])
   const totalPhotos = useLiveQuery(() => db.photos.count(), [], 0)
+  const placeCount = useLiveQuery(async () => {
+    const places = new Set<string>()
+    await db.photos.each((p) => p.place && places.add(p.place))
+    return places.size
+  }, [], 0)
 
   const range = albumRange(settings.albumSize, now)
   const albumPhotos = useLiveQuery(() => photosInRange(range.start, range.end).reverse().toArray(), [range.start, range.end], [])
@@ -41,7 +47,8 @@ export default function Home({ go }: { go: Go }) {
         <h1 className="title mt-1">{settings.name ? `Hej ${settings.name}` : config.appName}</h1>
       </header>
 
-      {isIos() && !isStandalone() && <InstallHint />}
+      {isIos() && !isStandalone() && !isNative() && <InstallHint />}
+      {isNative() && <AccessPopup />}
 
       {/* Round card */}
       <section className={`rounded-card p-6 ${status.isDue ? 'bg-accent text-accent-ink shadow-lg shadow-accent/20' : 'card'}`}>
@@ -98,9 +105,10 @@ export default function Home({ go }: { go: Go }) {
         <ProgressBar value={albumPhotos.length / goal} className="mt-2" />
       </button>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Stat value={totalPhotos} label="guldkorn totalt" />
         <Stat value={rounds.length} label="urval gjorda" />
+        <Stat value={placeCount} label="platser" />
       </div>
     </div>
   )
@@ -131,6 +139,39 @@ function Stat({ value, label }: { value: number; label: string }) {
       <p className="font-serif text-2xl">{value}</p>
       <p className="text-xs text-muted">{label}</p>
     </div>
+  )
+}
+
+/** Native app, first launch: ask for access to all photos right away. */
+function AccessPopup() {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    libraryAccess().then((a) => setOpen(a === 'prompt'))
+  }, [])
+  return (
+    <Sheet open={open} onClose={() => setOpen(false)}>
+      <div className="space-y-4 pb-2 text-center">
+        <div className="text-5xl">📸</div>
+        <h2 className="font-serif text-2xl">Låt Guldkorn hitta dina bilder</h2>
+        <p className="text-sm text-muted">
+          Med tillgång till alla bilder hämtar appen veckans foton automatiskt, grupperar liknande bilder och föreslår den bästa. Du behöver aldrig markera något
+          själv.
+        </p>
+        <p className="text-sm text-muted">🔒 Allt sker i telefonen. Inga bilder laddas upp, någonsin.</p>
+        <button
+          className="btn-primary w-full py-4"
+          onClick={async () => {
+            await requestLibraryAccess()
+            setOpen(false)
+          }}
+        >
+          <Images size={20} /> Ge tillgång till alla bilder
+        </button>
+        <button className="btn-ghost w-full text-sm" onClick={() => setOpen(false)}>
+          Inte nu
+        </button>
+      </div>
+    </Sheet>
   )
 }
 

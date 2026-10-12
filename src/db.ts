@@ -6,8 +6,13 @@ import { config, type AlbumSize, type PickMode } from './config'
 
 export interface Photo {
   id: string
-  takenAt: number // capture time (EXIF), falls back to file date
-  dateSource: 'exif' | 'file'
+  takenAt: number // capture time (EXIF / photo library), falls back to file date
+  dateSource: 'exif' | 'file' | 'library'
+  // Optional metadata (only stored here on the phone; never included in exported JPEGs)
+  lat?: number
+  lon?: number
+  place?: string // offline place name, e.g. "Visby" or "Barcelona, Spanien"
+  camera?: string
   addedAt: number
   roundId: string
   fingerprint: string // used to skip photos that were already saved
@@ -56,6 +61,8 @@ export interface Settings {
   reminderWeekday: number
   reminderTime: string
   pickMode: PickMode
+  findDuplicates: boolean
+  saveLocation: boolean
 }
 
 class GuldkornDB extends Dexie {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Bell, BellRing, CalendarPlus, Download, Lock, Upload } from 'lucide-react'
+import { Bell, BellRing, CalendarPlus, Download, Images, Lock, Upload } from 'lucide-react'
+import { isNative, libraryAccess, openAppSettings, requestLibraryAccess, type LibraryAccess } from '../lib/native'
 import { config, type AlbumSize, type PickMode } from '../config'
 import { clearAllData, db, saveSettings, useSettings } from '../db'
 import { createBackup, restoreBackup } from '../lib/backup'
@@ -94,22 +95,45 @@ export default function Settings() {
           />
         </Section>
 
-        <Section
-          title="Så väljer du"
-          hint={
-            s.pickMode === 'swipe'
-              ? 'Markera veckans bilder i bildväljaren (dra fingret över dem), sedan sveper du fram favoriterna.'
-              : 'Välj dina favoriter direkt i bildväljaren – de sparas utan svepsteg.'
-          }
-        >
-          <Segmented<PickMode>
-            options={[
-              { value: 'swipe', label: 'Svep (roligt)' },
-              { value: 'direct', label: 'Direkt (snabbt)' },
-            ]}
-            value={s.pickMode}
-            onChange={(v) => saveSettings({ pickMode: v })}
-          />
+        {isNative() ? (
+          <Section title="Bilder" hint="Appen läser bilderna direkt i telefonen. Inget laddas upp.">
+            <LibraryAccessControls />
+          </Section>
+        ) : (
+          <Section
+            title="Så väljer du"
+            hint={
+              s.pickMode === 'swipe'
+                ? 'Markera veckans bilder i bildväljaren (dra fingret över dem), sedan sveper du fram favoriterna.'
+                : 'Välj dina favoriter direkt i bildväljaren – de sparas utan svepsteg.'
+            }
+          >
+            <Segmented<PickMode>
+              options={[
+                { value: 'swipe', label: 'Svep (roligt)' },
+                { value: 'direct', label: 'Direkt (snabbt)' },
+              ]}
+              value={s.pickMode}
+              onChange={(v) => saveSettings({ pickMode: v })}
+            />
+          </Section>
+        )}
+
+        <Section title="Smarta funktioner">
+          <div className="card divide-y divide-line">
+            <Toggle
+              label="Hitta liknande bilder"
+              hint="Grupperar bilder tagna i samma ögonblick och föreslår den skarpaste."
+              value={s.findDuplicates}
+              onChange={(v) => saveSettings({ findDuplicates: v })}
+            />
+            <Toggle
+              label="Spara plats"
+              hint="Visar var bilden togs (t.ex. ”Visby”). Platsen slås upp i telefonen och följer aldrig med exporterade bilder."
+              value={s.saveLocation}
+              onChange={(v) => saveSettings({ saveLocation: v })}
+            />
+          </div>
         </Section>
 
         <Section title="Påminnelse">
@@ -129,7 +153,7 @@ export default function Settings() {
             onClick={() => {
               const ics = buildReminderIcs({
                 appName: config.appName,
-                appUrl: location.origin + location.pathname,
+                appUrl: isNative() ? '' : location.origin + location.pathname,
                 title: `${cadenceLabel(s.cadenceDays)} i ${config.appName}`,
                 cadenceDays: s.cadenceDays,
                 weekday: s.reminderWeekday,
@@ -148,7 +172,8 @@ export default function Settings() {
               <Lock size={16} className="text-keep" /> Allt stannar i din telefon
             </p>
             <p className="text-muted">
-              Bilderna sparas bara här i appen. Inget skickas till någon server, det finns inga konton och ingen spårning. Platsinformation tas bort när bilderna sparas.
+              Bilderna sparas bara här i appen. Inget skickas till någon server, det finns inga konton och ingen spårning. Analysen av liknande bilder och platsnamn
+              görs i telefonen. Bilder du exporterar innehåller ingen platsinformation.
             </p>
             {storage && (
               <p className="text-muted">
@@ -220,6 +245,8 @@ export default function Settings() {
 
         <p className="pb-4 text-center text-xs text-muted">
           {config.appName} · gjord med kärlek ♥
+          <br />
+          Platsnamn: GeoNames (CC BY 4.0)
         </p>
       </div>
     </div>
@@ -330,6 +357,54 @@ function PushControls() {
       )}
       {info && <p className="text-sm text-muted">{info}</p>}
       <PushDiagnostics key={state} />
+    </div>
+  )
+}
+
+function Toggle({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-4 p-4">
+      <span>
+        <span className="block text-sm font-medium">{label}</span>
+        {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+      </span>
+      <input type="checkbox" role="switch" className="peer sr-only" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <span className="relative mt-0.5 h-7 w-12 shrink-0 rounded-full bg-line transition peer-checked:bg-keep after:absolute after:top-0.5 after:left-0.5 after:h-6 after:w-6 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5" />
+    </label>
+  )
+}
+
+const ACCESS_TEXT: Record<LibraryAccess, string> = {
+  granted: 'Appen har tillgång till alla bilder ✓',
+  limited: 'Appen ser bara de bilder du har valt ut.',
+  denied: 'Appen har inte tillgång till dina bilder.',
+  prompt: 'Appen har inte fått tillgång till dina bilder än.',
+}
+
+function LibraryAccessControls() {
+  const [access, setAccess] = useState<LibraryAccess>()
+  const refresh = () => libraryAccess().then(setAccess)
+  useEffect(() => {
+    refresh()
+    // Coming back from the system settings app → check again.
+    const onVisible = () => document.visibilityState === 'visible' && refresh()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+  if (!access) return null
+  return (
+    <div className="card space-y-3 p-4">
+      <p className="text-sm">{ACCESS_TEXT[access]}</p>
+      {access === 'prompt' && (
+        <button className="btn-primary w-full" onClick={async () => setAccess(await requestLibraryAccess())}>
+          <Images size={18} /> Ge tillgång till alla bilder
+        </button>
+      )}
+      {(access === 'denied' || access === 'limited') && (
+        <button className="btn-primary w-full" onClick={() => openAppSettings()}>
+          Ändra till ”Alla bilder” i Inställningar
+        </button>
+      )}
     </div>
   )
 }

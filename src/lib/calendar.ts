@@ -52,7 +52,7 @@ export function buildReminderIcs(opts: {
     `RRULE:${rrule(opts.cadenceDays)}`,
     `SUMMARY:✨ ${opts.title}`,
     `DESCRIPTION:Öppna ${opts.appName} och välj dina bästa bilder.`,
-    `URL:${opts.appUrl}`,
+    ...(opts.appUrl ? [`URL:${opts.appUrl}`] : []),
     'BEGIN:VALARM',
     'ACTION:DISPLAY',
     'TRIGGER:PT0M',

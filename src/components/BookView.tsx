@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { FileDown, Loader2 } from 'lucide-react'
 import { db, photosInRange, type Photo } from '../db'
-import { BOOK_FORMATS, layoutBook, PAGE_MARGIN_MM, type BookPage, type PerPage } from '../lib/book'
+import { BOOK_FORMATS, layoutBook, metaCaption, PAGE_MARGIN_MM, type BookPage, type PerPage } from '../lib/book'
 import { formatRange } from '../lib/dates'
 import { shareFiles, slugify } from '../lib/share'
 import { Header, ProgressBar, Segmented, Thumb } from './ui'
@@ -15,12 +15,17 @@ export default function BookView({ id, onBack }: { id: string; onBack: () => voi
   const [formatId, setFormatId] = useState('square')
   const [perPage, setPerPage] = useState<PerPage>('auto')
   const [title, setTitle] = useState<string>()
+  const [showMeta, setShowMeta] = useState(false)
   const [exp, setExp] = useState<Export>({ state: 'idle' })
 
   const format = BOOK_FORMATS.find((f) => f.id === formatId)!
   const bookTitle = title ?? album?.name ?? ''
   const subtitle = album ? formatRange(album.start, album.end, true) : ''
-  const pages = useMemo(() => layoutBook(photos, perPage, bookTitle, subtitle), [photos, perPage, bookTitle, subtitle])
+  const layoutPhotos = useMemo(
+    () => photos.map((p) => (p.caption || !showMeta ? p : { ...p, caption: metaCaption(p), autoCaption: true })),
+    [photos, showMeta],
+  )
+  const pages = useMemo(() => layoutBook(layoutPhotos, perPage, bookTitle, subtitle), [layoutPhotos, perPage, bookTitle, subtitle])
   const byId = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos])
 
   async function makePdf() {
@@ -49,6 +54,10 @@ export default function BookView({ id, onBack }: { id: string; onBack: () => voi
           aria-label="Titel"
         />
         <Segmented options={BOOK_FORMATS.map((f) => ({ value: f.id, label: f.label }))} value={formatId} onChange={(v) => (setFormatId(v), reset())} />
+        <label className="flex cursor-pointer items-center justify-between rounded-xl border border-line bg-card px-4 py-3 text-sm">
+          Plats och datum under bilderna
+          <input type="checkbox" className="h-5 w-5 accent-[var(--color-accent)]" checked={showMeta} onChange={(e) => (setShowMeta(e.target.checked), reset())} />
+        </label>
         <div>
           <p className="label mb-2">Bilder per sida</p>
           <Segmented<PerPage>

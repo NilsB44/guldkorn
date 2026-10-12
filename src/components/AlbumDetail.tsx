@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { BookOpen, Download, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { BookOpen, Camera, Download, Loader2, MapPin, Pencil, Trash2 } from 'lucide-react'
 import { db, deletePhoto, jpegBlob, photosInRange, type Photo } from '../db'
-import { formatDate, formatRange, isoWeek } from '../lib/dates'
+import { formatDate, formatRange, formatTime, isoWeek, timeOfDay } from '../lib/dates'
 import { shareFiles, slugify } from '../lib/share'
 import type { Go } from '../nav'
 import { ConfirmButton, Header, Sheet, Thumb, useObjectUrl } from './ui'
@@ -13,16 +13,24 @@ export default function AlbumDetail({ id, go, onBack }: { id: string; go: Go; on
   const [open, setOpen] = useState<Photo>()
   const [renaming, setRenaming] = useState(false)
   const [files, setFiles] = useState<File[] | 'preparing'>()
+  const [placeFilter, setPlaceFilter] = useState<string>()
 
   if (!album) return <Header title="" onBack={onBack} />
 
-  // Group by week for a calm, diary-like overview.
-  const groups: { label: string; photos: Photo[] }[] = []
-  for (const p of photos) {
+  // Places in this album, most photos first (for the filter chips).
+  const placeCounts = new Map<string, number>()
+  for (const p of photos) if (p.place) placeCounts.set(p.place, (placeCounts.get(p.place) ?? 0) + 1)
+  const places = [...placeCounts.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name)
+  const shown = placeFilter ? photos.filter((p) => p.place === placeFilter) : photos
+
+  // Group by week for a calm, diary-like overview, with the week's places in the heading.
+  const groups: { label: string; places: string[]; photos: Photo[] }[] = []
+  for (const p of shown) {
     const label = `Vecka ${isoWeek(p.takenAt)}`
     const last = groups.at(-1)
-    if (last?.label === label) last.photos.push(p)
-    else groups.push({ label, photos: [p] })
+    const group = last?.label === label ? last : (groups.push({ label, places: [], photos: [] }), groups.at(-1)!)
+    group.photos.push(p)
+    if (p.place && !group.places.includes(p.place)) group.places.push(p.place)
   }
 
   async function prepareFiles() {
@@ -64,10 +72,33 @@ export default function AlbumDetail({ id, go, onBack }: { id: string; go: Go; on
 
       {photos.length === 0 && <p className="mt-10 px-5 text-center text-muted">Inga guldkorn från den här perioden än.</p>}
 
+      {places.length > 1 && (
+        <div className="mt-4 flex gap-2 overflow-x-auto px-5 pb-1" data-testid="place-filter">
+          {[undefined, ...places].map((place) => (
+            <button
+              key={place ?? 'alla'}
+              onClick={() => setPlaceFilter(place)}
+              className={`flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-sm ${placeFilter === place ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-card text-muted'}`}
+            >
+              {place ? (
+                <>
+                  <MapPin size={13} /> {place} <span className="opacity-70">{placeCounts.get(place)}</span>
+                </>
+              ) : (
+                'Alla platser'
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="mt-6 space-y-6 px-5">
         {groups.map((g) => (
           <section key={g.label}>
-            <p className="label mb-2">{g.label}</p>
+            <p className="label mb-2">
+              {g.label}
+              {g.places.length > 0 && <span className="font-normal normal-case tracking-normal"> · {g.places.slice(0, 3).join(', ')}</span>}
+            </p>
             <div className="grid grid-cols-3 gap-1.5">
               {g.photos.map((p) => (
                 <button key={p.id} onClick={() => setOpen(p)} className="relative aspect-square overflow-hidden rounded-xl">
@@ -115,10 +146,25 @@ function PhotoSheet({ photo, onClose }: { photo?: Photo; onClose: () => void }) 
       {photo && (
         <>
           {url ? <img src={url} alt="" className="max-h-[55dvh] w-full rounded-2xl object-contain" /> : <Thumb photo={photo} className="max-h-[55dvh] w-full rounded-2xl" />}
-          <p className="mt-3 text-sm text-muted">
-            {formatDate(photo.takenAt)}
-            {photo.dateSource === 'file' && ' (ungefärligt datum)'}
-          </p>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted" data-testid="photo-details">
+            <span>
+              {formatDate(photo.takenAt)}
+              {photo.dateSource === 'file' ? ' (ungefärligt datum)' : ` · ${formatTime(photo.takenAt)}`}
+            </span>
+            <span>
+              {timeOfDay(photo.takenAt).emoji} {timeOfDay(photo.takenAt).label}
+            </span>
+            {photo.place && (
+              <span className="flex items-center gap-1">
+                <MapPin size={14} /> {photo.place}
+              </span>
+            )}
+            {photo.camera && (
+              <span className="flex items-center gap-1">
+                <Camera size={14} /> {photo.camera}
+              </span>
+            )}
+          </div>
           <textarea
             className="mt-3 w-full rounded-2xl border border-line bg-card p-3"
             rows={2}

@@ -1,0 +1,64 @@
+# Builds the native apps on every push to main:
+#   • Android: a debug APK you can install on any Android phone (download it from the run's "Artifacts").
+#   • iOS: compiles the app for the iOS simulator — proves the Swift code builds, no Apple account needed.
+#     (Installing on an iPhone goes through ios-testflight.yml, which needs an Apple Developer account.)
+name: Native apps
+
+on:
+  push:
+    branches: [main, native-app]
+  workflow_dispatch:
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon > build.log 2>&1 || true
+          # Compiler errors become annotations, visible on the run page without logging in.
+          grep -E "error:|What went wrong" -A 2 build.log | head -30 | sed 's/^/::error::/' || true
+          tail -20 build.log
+          test -f app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guldkorn-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync ios
+      - name: Build for iOS simulator
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 || true
+          grep -E "error:" build.log | sort -u | head -30 | sed 's/^/::error::/' || true
+          tail -5 build.log
+          grep -q "BUILD SUCCEEDED" build.log

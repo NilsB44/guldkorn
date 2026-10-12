@@ -1,44 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import confetti from 'canvas-confetti'
-import { Check, Heart, ImagePlus, Loader2, Undo2, X } from 'lucide-react'
+import { Check, Heart, ImagePlus, Images, Loader2, MapPin, Settings2, Undo2, X } from 'lucide-react'
 import { config } from '../config'
 import { db, newId, useSettings } from '../db'
 import { ensureAlbums, findAutoAlbum } from '../lib/albums'
-import { albumRange, cadenceLabel, cadenceUnit, computeStreak, formatDate, formatRange, roundStatus } from '../lib/dates'
-import { processPhoto, readMeta, type PhotoMeta } from '../lib/images'
+import { albumRange, cadenceLabel, cadenceUnit, computeStreak, formatDate, formatRange, roundStatus, timeOfDay } from '../lib/dates'
+import { processPhoto } from '../lib/images'
+import { isNative, libraryAccess, manageLimitedSelection, openAppSettings, requestLibraryAccess, type LibraryAccess } from '../lib/native'
+import { lookupPlace } from '../lib/places'
+import { analyzePhoto, groupSimilar, suggestBest } from '../lib/similar'
+import { candidatesFromFiles, candidatesFromLibrary, mapLimit, type Candidate } from '../lib/sources'
 import { cheer, crossedMilestone, milestoneText } from '../lib/stats'
 import type { Go } from '../nav'
+import Duplicates, { type DuplicateGroup } from './Duplicates'
 import { ConfirmButton, ProgressBar } from './ui'
 
-interface Candidate extends PhotoMeta {
-  key: string
-  file: File
-  url: string
-  inPeriod: boolean
+interface RoundCandidate extends Candidate {
+  place?: string
 }
 
-type Step = 'pick' | 'loading' | 'swipe' | 'review' | 'saving' | 'done'
+type Step = 'pick' | 'loading' | 'duplicates' | 'swipe' | 'review' | 'saving' | 'done'
 
 interface Result {
   kept: number
   streak: number
   milestone?: number
   albumId?: string
-}
-
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length)
-  let next = 0
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (next < items.length) {
-        const i = next++
-        out[i] = await fn(items[i])
-      }
-    }),
-  )
-  return out
+  newPlaces: string[]
 }
 
 export default function Round({ go, onClose }: { go: Go; onClose: () => void }) {
@@ -48,11 +37,16 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
   const lastEnd = rounds?.length ? Math.max(...rounds.map((r) => r.periodEnd)) : undefined
   const status = roundStatus(lastEnd, settings.cadenceDays, now)
   const target = settings.picksPerRound
+  const native = isNative()
 
   const [step, setStep] = useState<Step>('pick')
+  const [loadingText, setLoadingText] = useState('')
+  const [loadingProgress, setLoadingProgress] = useState<number>()
   const [notice, setNotice] = useState('')
-  const [candidates, setCandidates] = useState<Candidate[]>([])
-  const [hiddenOlder, setHiddenOlder] = useState<Candidate[]>([])
+  const [access, setAccess] = useState<LibraryAccess>()
+  const [candidates, setCandidates] = useState<RoundCandidate[]>([])
+  const [hiddenOlder, setHiddenOlder] = useState<RoundCandidate[]>([])
+  const [groups, setGroups] = useState<DuplicateGroup[]>([])
   const [index, setIndex] = useState(0)
   const [kept, setKept] = useState<Set<string>>(new Set())
   const [decided, setDecided] = useState<string[]>([])
@@ -64,37 +58,104 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
   const urls = useRef<string[]>([])
   useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), [])
 
+  // Native app: check photo access, and if already granted go straight to this period's photos.
+  const autoStarted = useRef(false)
+  useEffect(() => {
+    if (!native || rounds === undefined || autoStarted.current) return
+    autoStarted.current = true
+    libraryAccess().then((a) => {
+      setAccess(a)
+      if (a === 'granted' || a === 'limited') loadFromLibrary()
+    })
+  }, [native, rounds])
+
+  async function askAccess() {
+    const a = await requestLibraryAccess()
+    setAccess(a)
+    if (a === 'granted' || a === 'limited') loadFromLibrary()
+  }
+
+  async function loadFromLibrary() {
+    setStep('loading')
+    setNotice('')
+    setLoadingText('Hämtar bilderna från perioden…')
+    try {
+      const list = await candidatesFromLibrary(status.periodStart, Date.now(), urls.current, (done, total) => {
+        setLoadingText(`Hämtar bilderna… ${done} av ${total}`)
+        setLoadingProgress(total ? done / total : undefined)
+      })
+      await prepare(list, 0)
+    } catch (err) {
+      setNotice(`Kunde inte hämta bilderna (${err instanceof Error ? err.message : err}).`)
+      setStep('pick')
+    }
+  }
+
   async function onFiles(list: FileList | null) {
     const files = Array.from(list ?? [])
     if (!files.length) return
     setStep('loading')
     setNotice('')
-    const metas = await mapLimit(files, 4, readMeta)
-    const saved = new Set(
-      (await db.photos.where('fingerprint').anyOf(metas.map((m) => m.fingerprint)).toArray()).map((p) => p.fingerprint),
-    )
-    const fresh = files
-      .map((file, i) => ({ file, ...metas[i] }))
-      .filter((c) => !saved.has(c.fingerprint))
-      .sort((a, b) => a.takenAt - b.takenAt)
-      .map((c, i) => {
-        const url = URL.createObjectURL(c.file)
-        urls.current.push(url)
-        return { ...c, key: `${i}-${c.fingerprint}`, url, inPeriod: c.takenAt >= status.periodStart - 86400000 }
-      })
-    const dupes = files.length - fresh.length
-    if (dupes) setNotice(`${dupes} ${dupes === 1 ? 'bild var' : 'bilder var'} redan sparade och hoppas över.`)
-    if (!fresh.length) return setStep('pick')
+    setLoadingText('Läser in bilderna…')
+    setLoadingProgress(undefined)
+    await prepare(await candidatesFromFiles(files, status.periodStart, urls.current), files.length)
+  }
+
+  /** Shared by both sources: drop already-saved photos, filter to the period, analyse, then continue. */
+  async function prepare(all: RoundCandidate[], pickedCount: number) {
+    const saved = new Set((await db.photos.where('fingerprint').anyOf(all.map((c) => c.fingerprint)).toArray()).map((p) => p.fingerprint))
+    const fresh = all.filter((c) => !saved.has(c.fingerprint)).sort((a, b) => a.takenAt - b.takenAt)
+    const dupes = all.length - fresh.length
+    if (pickedCount && dupes) setNotice(`${dupes} ${dupes === 1 ? 'bild var' : 'bilder var'} redan sparade och hoppas över.`)
+    if (!fresh.length) {
+      if (!pickedCount) setNotice(all.length ? 'Alla bilder från perioden är redan genomgångna. 🎉' : 'Inga nya bilder från perioden hittades.')
+      return setStep('pick')
+    }
 
     // Auto-filter to the period (unless everything picked is older — then she meant it).
     const inPeriod = fresh.filter((c) => c.inPeriod)
     const older = inPeriod.length ? fresh.filter((c) => !c.inPeriod) : []
+    let list = inPeriod.length ? inPeriod : fresh
+
+    // Place names (offline lookup) for the chips on each photo.
+    if (settings.saveLocation && list.some((c) => c.lat !== undefined)) {
+      setLoadingText('Letar upp platser…')
+      await mapLimit(list, 8, async (c) => {
+        c.place = await lookupPlace(c.lat, c.lon)
+      })
+    }
+
+    let groupsFound: DuplicateGroup[] = []
+    if (settings.findDuplicates && list.length > 1) {
+      setLoadingText('Letar efter liknande bilder…')
+      let done = 0
+      await mapLimit(list, 2, async (c) => {
+        try {
+          c.analysis = await analyzePhoto(await c.analysisBlob())
+        } catch (err) {
+          console.warn('Could not analyse photo', err)
+        }
+        setLoadingProgress(++done / list.length)
+      })
+      const analyses = new Map(list.map((c) => [c.key, c.analysis]))
+      groupsFound = groupSimilar(list).map((keys) => ({ keys, suggested: suggestBest(keys, analyses) }))
+    }
+    list = [...list]
     setHiddenOlder(older)
-    setCandidates(inPeriod.length ? inPeriod : fresh)
+    setCandidates(list)
+    setGroups(groupsFound)
     setIndex(0)
     setDecided([])
-    if (settings.pickMode === 'direct') {
-      setKept(new Set((inPeriod.length ? inPeriod : fresh).map((c) => c.key)))
+    if (groupsFound.length) setStep('duplicates')
+    else startChoosing(list)
+  }
+
+  function startChoosing(list: RoundCandidate[]) {
+    setCandidates(list)
+    setIndex(0)
+    setDecided([])
+    if (settings.pickMode === 'direct' && !native) {
+      setKept(new Set(list.map((c) => c.key)))
       setStep('review')
     } else {
       setKept(new Set())
@@ -102,9 +163,15 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
     }
   }
 
+  function afterDuplicates(dropped: Set<string>) {
+    const n = dropped.size
+    if (n) setNotice(`${n} liknande ${n === 1 ? 'bild' : 'bilder'} sorterades bort.`)
+    startChoosing(candidates.filter((c) => !dropped.has(c.key)))
+  }
+
   function showOlder() {
     setCandidates([...candidates, ...hiddenOlder])
-    if (settings.pickMode === 'direct') setKept(new Set([...kept, ...hiddenOlder.map((c) => c.key)]))
+    if (step === 'review') setKept(new Set([...kept, ...hiddenOlder.map((c) => c.key)]))
     setHiddenOlder([])
   }
 
@@ -156,10 +223,13 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
   async function saveChosen() {
     const chosen = candidates.filter((c) => kept.has(c.key))
     const before = await db.photos.count()
+    const knownPlaces = new Set<string>()
+    await db.photos.each((p) => p.place && knownPlaces.add(p.place))
     const roundId = newId()
     for (const [i, c] of chosen.entries()) {
-      const img = await processPhoto(c.file)
+      const img = await processPhoto(await c.fullBlob())
       const id = newId()
+      const location = settings.saveLocation && c.lat !== undefined ? { lat: c.lat, lon: c.lon, place: c.place } : {}
       await db.transaction('rw', db.photos, db.images, async () => {
         await db.photos.add({
           id,
@@ -171,6 +241,8 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
           width: img.width,
           height: img.height,
           thumb: img.thumb,
+          camera: c.camera,
+          ...location,
         })
         await db.images.add({ id, data: img.data })
       })
@@ -182,11 +254,13 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
 
     const allRounds = await db.rounds.toArray()
     const album = await findAutoAlbum(settings.albumSize, albumRange(settings.albumSize, completedAt).start)
+    const newPlaces = [...new Set(chosen.map((c) => c.place).filter((p): p is string => !!p && !knownPlaces.has(p)))]
     setResult({
       kept: chosen.length,
       streak: computeStreak(allRounds.map((r) => r.completedAt), settings.cadenceDays, config.streakGraceDays, completedAt),
       milestone: crossedMilestone(before, before + chosen.length),
       albumId: album?.id,
+      newPlaces: before > 0 ? newPlaces : [],
     })
     setStep('done')
     if (chosen.length) {
@@ -196,6 +270,24 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
 
   const periodText = formatRange(status.periodStart, now)
   const reviewedSome = decided.length > 0
+  const byKey = new Map(candidates.map((c) => [c.key, c]))
+
+  const filePicker = (label: React.ReactNode, className: string) => (
+    <label className={`${className} cursor-pointer`}>
+      {label}
+      <input
+        data-testid="file-input"
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          onFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
+    </label>
+  )
 
   return (
     <div className="pt-safe pb-safe flex min-h-dvh flex-col px-5">
@@ -222,7 +314,10 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
         <div className="flex flex-1 flex-col">
           <p className="label mt-4">{cadenceLabel(settings.cadenceDays)}</p>
           <h1 className="title mt-2">{periodText}</h1>
-          {settings.pickMode === 'swipe' ? (
+
+          {native ? (
+            <NativeIntro access={access} periodText={periodText} target={target} />
+          ) : settings.pickMode === 'swipe' ? (
             <ol className="mt-8 space-y-5">
               <Li n={1}>
                 Markera alla bilder från <strong>{periodText}</strong> i ett svep.
@@ -230,7 +325,7 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
                   Dra fingret över rutnätet, de senaste ligger överst. Råkar du ta med äldre bilder sorteras de bort automatiskt.
                 </span>
               </Li>
-              <Li n={2}>Svep höger för att behålla, vänster för att hoppa över.</Li>
+              <Li n={2}>Välj den bästa bland liknande bilder, svep sedan höger för att behålla.</Li>
               <Li n={3}>
                 Spara dina <strong>{target} bästa</strong>. De hamnar automatiskt i rätt album.
               </Li>
@@ -244,22 +339,37 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
             </ol>
           )}
           {notice && <p className="mt-6 rounded-2xl bg-accent-soft p-3 text-sm">{notice}</p>}
-          <div className="mt-auto pt-8">
-            <label className="btn-primary w-full cursor-pointer py-4 text-lg">
-              <ImagePlus size={22} /> Välj bilder
-              <input
-                data-testid="file-input"
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  onFiles(e.target.files)
-                  e.target.value = ''
-                }}
-              />
-            </label>
-            <p className="mt-3 text-center text-xs text-muted">🔒 Bilderna stannar i din telefon. Inget laddas upp.</p>
+
+          <div className="mt-auto space-y-2 pt-8">
+            {native && access === 'prompt' && (
+              <button className="btn-primary w-full py-4 text-lg" onClick={askAccess}>
+                <Images size={22} /> Ge tillgång till alla bilder
+              </button>
+            )}
+            {native && access === 'denied' && (
+              <button className="btn-primary w-full py-4 text-lg" onClick={() => openAppSettings()}>
+                <Settings2 size={22} /> Öppna Inställningar
+              </button>
+            )}
+            {native && (access === 'granted' || access === 'limited') && (
+              <button className="btn-primary w-full py-4 text-lg" onClick={loadFromLibrary}>
+                <Images size={22} /> Hämta veckans bilder
+              </button>
+            )}
+            {native && access === 'limited' && (
+              <button className="btn-ghost w-full text-sm" onClick={() => manageLimitedSelection().then(loadFromLibrary)}>
+                Välj fler bilder som appen får se
+              </button>
+            )}
+            {native
+              ? filePicker(<>Välj bilder manuellt i stället</>, 'btn-ghost w-full text-sm')
+              : filePicker(
+                  <>
+                    <ImagePlus size={22} /> Välj bilder
+                  </>,
+                  'btn-primary w-full py-4 text-lg',
+                )}
+            <p className="pt-1 text-center text-xs text-muted">🔒 Bilderna stannar i din telefon. Inget laddas upp.</p>
           </div>
         </div>
       )}
@@ -267,9 +377,12 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
       {step === 'loading' && (
         <Centered>
           <Loader2 className="animate-spin text-accent" size={36} />
-          <p className="mt-4 text-muted">Läser in bilderna…</p>
+          <p className="mt-4 text-muted">{loadingText}</p>
+          {loadingProgress !== undefined && <ProgressBar value={loadingProgress} className="mt-4 w-56" />}
         </Centered>
       )}
+
+      {step === 'duplicates' && groups.length > 0 && <Duplicates groups={groups} byKey={byKey} onDone={afterDuplicates} />}
 
       {step === 'swipe' && candidates[index] && (
         <div className="flex flex-1 flex-col">
@@ -285,6 +398,7 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
               </>
             )}
           </p>
+          {notice && index === 0 && <p className="mt-2 text-center text-xs text-muted">{notice}</p>}
           <div className="relative mt-3 flex-1">
             {candidates[index + 1] && (
               <div className="absolute inset-0 scale-95 overflow-hidden rounded-card bg-card opacity-60">
@@ -358,6 +472,11 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
                 🔥 <strong>{result.streak}</strong> {cadenceUnit(settings.cadenceDays, result.streak)} i rad
               </p>
             )}
+            {result.newPlaces.length > 0 && (
+              <p className="card p-4 text-center">
+                📍 {result.newPlaces.length === 1 ? 'Ny plats' : 'Nya platser'}: <strong>{result.newPlaces.join(', ')}</strong>
+              </p>
+            )}
             {result.milestone && <p className="card p-4 text-center">{milestoneText(result.milestone)}</p>}
           </div>
           <div className="mt-8 w-full space-y-3">
@@ -376,6 +495,36 @@ export default function Round({ go, onClose }: { go: Go; onClose: () => void }) 
   )
 }
 
+function NativeIntro({ access, periodText, target }: { access?: LibraryAccess; periodText: string; target: number }) {
+  if (access === 'prompt')
+    return (
+      <div className="card mt-8 space-y-3 p-5">
+        <p className="font-serif text-xl">Låt appen hitta veckans bilder åt dig</p>
+        <p className="text-sm text-muted">
+          Ge Guldkorn tillgång till dina bilder, så hämtas allt från <strong>{periodText}</strong> automatiskt. Liknande bilder grupperas och den bästa föreslås.
+          Du behöver aldrig markera något själv.
+        </p>
+        <p className="text-sm text-muted">🔒 Bilderna läses bara här i telefonen. Inget laddas upp.</p>
+      </div>
+    )
+  if (access === 'denied')
+    return (
+      <div className="card mt-8 space-y-2 p-5 text-sm">
+        <p className="font-medium">Appen har inte tillgång till dina bilder</p>
+        <p className="text-muted">Öppna Inställningar → Guldkorn → Bilder och välj ”Alla bilder”.</p>
+      </div>
+    )
+  return (
+    <ol className="mt-8 space-y-5">
+      <Li n={1}>Appen hämtar alla bilder från {periodText}.</Li>
+      <Li n={2}>Välj den bästa bland liknande bilder, svep sedan höger för att behålla.</Li>
+      <Li n={3}>
+        Spara dina <strong>{target} bästa</strong>. De hamnar automatiskt i rätt album.
+      </Li>
+    </ol>
+  )
+}
+
 function Li({ n, children }: { n: number; children: React.ReactNode }) {
   return (
     <li className="flex gap-4">
@@ -389,7 +538,7 @@ function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex flex-1 flex-col items-center justify-center py-10">{children}</div>
 }
 
-function SwipeCard({ candidate, onDecide }: { candidate: Candidate; onDecide: (keep: boolean) => void }) {
+function SwipeCard({ candidate, onDecide }: { candidate: RoundCandidate; onDecide: (keep: boolean) => void }) {
   const [dx, setDx] = useState(0)
   const [leaving, setLeaving] = useState(false)
   const startX = useRef<number | null>(null)
@@ -412,6 +561,7 @@ function SwipeCard({ candidate, onDecide }: { candidate: Candidate; onDecide: (k
   })
 
   const strength = Math.min(1, Math.abs(dx) / 120)
+  const tod = timeOfDay(candidate.takenAt)
   return (
     <div
       data-testid="swipe-card"
@@ -437,8 +587,17 @@ function SwipeCard({ candidate, onDecide }: { candidate: Candidate; onDecide: (k
       }}
     >
       <img src={candidate.url} alt="" draggable={false} className="pointer-events-none h-full w-full object-contain" />
-      <div className="absolute inset-x-0 bottom-0 flex gap-2 p-3 text-xs">
+      <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-2 p-3 text-xs" data-testid="photo-meta">
         <span className="rounded-full bg-ink/55 px-3 py-1 text-white backdrop-blur">{formatDate(candidate.takenAt)}</span>
+        <span className="rounded-full bg-ink/55 px-3 py-1 text-white backdrop-blur">
+          {tod.emoji} {tod.label}
+        </span>
+        {candidate.place && (
+          <span className="flex items-center gap-1 rounded-full bg-ink/55 px-3 py-1 text-white backdrop-blur">
+            <MapPin size={12} /> {candidate.place}
+          </span>
+        )}
+        {candidate.favorite && <span className="rounded-full bg-ink/55 px-3 py-1 text-white backdrop-blur">♥ favorit</span>}
         {!candidate.inPeriod && <span className="rounded-full bg-ink/55 px-3 py-1 text-white/80 backdrop-blur">äldre bild</span>}
       </div>
       <span

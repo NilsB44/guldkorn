@@ -1,0 +1,19 @@
+{
+  "name": "guldkorn-photo-library",
+  "version": "1.0.0",
+  "description": "Guldkorn's native photo library access: permission for all photos, photos in a date range with location/burst info, and resized images.",
+  "private": true,
+  "license": "MIT",
+  "author": "Guldkorn",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts", "android/src/main/", "android/build.gradle", "ios/Sources", "Package.swift", "GuldkornPhotoLibrary.podspec"],
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}
