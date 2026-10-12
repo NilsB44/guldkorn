@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "screenshots": "node -e \"process.env.SCREENSHOTS='1'; require('child_process').execSync('npx playwright test screenshots --project=iphone', {stdio:'inherit', env: process.env})\"",
-    "icons": "pwa-assets-generator --preset minimal-2023 public/icon.svg"
+    "icons": "pwa-assets-generator --preset minimal-2023 public/icon.svg",
+    "native:assets": "node scripts/native-assets.mjs && npx @capacitor/assets generate --ios --android --iconBackgroundColor \"#faf7f2\" --iconBackgroundColorDark \"#faf7f2\" --splashBackgroundColor \"#faf7f2\" --splashBackgroundColorDark \"#faf7f2\"",
+    "native:sync": "npm run build && npx cap sync"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.2",

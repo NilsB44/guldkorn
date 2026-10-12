@@ -1,6 +1,7 @@
 import Capacitor
 import Foundation
 import Photos
+import PhotosUI
 import UIKit
 
 /// Guldkorn's access to the iPhone photo library (PhotoKit).

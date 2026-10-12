@@ -1,0 +1,78 @@
+# Builds the iPhone app and uploads it to TestFlight (Apple's beta distribution) — no Mac needed.
+# Run it manually: GitHub → Actions → "iOS → TestFlight" → Run workflow.
+#
+# One-time setup (see NATIVE.md for screenshots-free step-by-step):
+#   1. Apple Developer Program membership (99 USD/year).
+#   2. App Store Connect → Apps → "+" → new app with bundle id io.github.nilsb44.guldkorn.
+#   3. App Store Connect → Users and Access → Integrations → App Store Connect API → new key with role "Admin"
+#      (needed so Xcode can create the signing certificate automatically). Download the .p8 file.
+#   4. GitHub repo → Settings → Secrets and variables → Actions → add:
+#        APPLE_TEAM_ID              (Membership details on developer.apple.com, 10 characters)
+#        APPSTORE_API_KEY_ID        (Key ID of the API key)
+#        APPSTORE_API_ISSUER_ID     (Issuer ID shown above the keys list)
+#        APPSTORE_API_KEY_P8        (the full contents of the .p8 file)
+name: iOS → TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    env:
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+    steps:
+      - name: Check secrets
+        run: |
+          for v in TEAM_ID KEY_ID ISSUER_ID; do
+            if [ -z "${!v}" ]; then echo "::error::Secret for $v is missing — see the comment at the top of ios-testflight.yml"; exit 1; fi
+          done
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync ios
+      - name: API key
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "${{ secrets.APPSTORE_API_KEY_P8 }}" > "$RUNNER_TEMP/keys/AuthKey.p8"
+      - name: Archive
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
+            archive > archive.log 2>&1 || true
+          grep -E "error:" archive.log | sort -u | head -30 | sed 's/^/::error::/' || true
+          tail -5 archive.log
+          grep -q "ARCHIVE SUCCEEDED" archive.log
+      - name: Upload to TestFlight
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
+            > export.log 2>&1 || true
+          grep -E "error:|Upload succeeded|EXPORT (SUCCEEDED|FAILED)" export.log | head -30 | sed 's/^/::notice::/' || true
+          tail -5 export.log
+          grep -qE "EXPORT SUCCEEDED|Upload succeeded" export.log
+      - name: Clean up key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"
